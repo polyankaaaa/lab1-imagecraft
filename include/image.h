@@ -1,41 +1,30 @@
 #pragma once
 
-#include <cstddef>
-#include <stdexcept>
+#include <cstdint>
 #include <vector>
 
 struct Pixel {
-    double r = 0.0;
-    double g = 0.0;
-    double b = 0.0;
+    uint8_t r{};
+    uint8_t g{};
+    uint8_t b{};
 };
 
 class Image {
 public:
     Image() = default;
+    Image(int width, int height);
 
-    Image(std::size_t width, std::size_t height)
-        : width_(width), height_(height), data_(width * height) {}
+    int GetWidth() const;
+    int GetHeight() const;
 
-    std::size_t Width() const { return width_; }
-    std::size_t Height() const { return height_; }
+    Pixel GetPixel(int x, int y) const;
+    void SetPixel(int x, int y, Pixel p);
 
-    Pixel& At(std::size_t x, std::size_t y) {
-        if (x >= width_ || y >= height_) {
-            throw std::out_of_range("Image::At out of range");
-        }
-        return data_[y * width_ + x];
-    }
-
-    const Pixel& At(std::size_t x, std::size_t y) const {
-        if (x >= width_ || y >= height_) {
-            throw std::out_of_range("Image::At out of range");
-        }
-        return data_[y * width_ + x];
-    }
+    std::vector<Pixel>& Data();
+    const std::vector<Pixel>& Data() const;
 
 private:
-    std::size_t width_ = 0;
-    std::size_t height_ = 0;
+    int width_ = 0;
+    int height_ = 0;
     std::vector<Pixel> data_;
 };

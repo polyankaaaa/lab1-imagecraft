@@ -1,0 +1,3 @@
+/Users/polinafedotova/lab1-imagecraft/build/CMakeFiles/imagecraft.dir
+/Users/polinafedotova/lab1-imagecraft/build/CMakeFiles/edit_cache.dir
+/Users/polinafedotova/lab1-imagecraft/build/CMakeFiles/rebuild_cache.dir

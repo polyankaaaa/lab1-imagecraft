@@ -3,6 +3,6 @@
 #include <memory>
 #include <vector>
 
-class Filter;
+#include "filter.h"
 
-std::vector<std::unique_ptr<Filter>> CreateFilters(int argc, char** argv, int start_index);
+std::vector<std::unique_ptr<Filter>> CreateFilters(int argc, char* argv[], int start_index);
