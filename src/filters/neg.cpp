@@ -1,17 +1,22 @@
-#include "filter.h"
+#include "filters/neg.h"
 
-class NegativeFilter : public Filter {
+class NegativeFilter final : public Filter {
 public:
-    Image Apply(const Image& src) const override {
-        Image dst = src;
-
-        for (std::size_t y = 0; y < src.Height(); ++y) {
-            for (std::size_t x = 0; x < src.Width(); ++x) {
-                const Pixel& p = src.At(x, y);
-                dst.At(x, y) = Pixel{1.0 - p.r, 1.0 - p.g, 1.0 - p.b};
+    void Apply(Image& image) const override {
+        const int w = image.GetWidth();
+        const int h = image.GetHeight();
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                Pixel p = image.GetPixel(x, y);
+                p.r = static_cast<uint8_t>(255 - p.r);
+                p.g = static_cast<uint8_t>(255 - p.g);
+                p.b = static_cast<uint8_t>(255 - p.b);
+                image.SetPixel(x, y, p);
             }
         }
-
-        return dst;
     }
 };
+
+std::unique_ptr<Filter> MakeNegative() {
+    return std::make_unique<NegativeFilter>();
+}

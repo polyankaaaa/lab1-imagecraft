@@ -1,18 +1,25 @@
-#include "filter.h"
+#include "filters/gs.h"
 
-class GrayscaleFilter : public Filter {
+#include "utils.h"
+
+#include <cmath>
+
+class GrayscaleFilter final : public Filter {
 public:
-    Image Apply(const Image& src) const override {
-        Image dst = src;
-
-        for (std::size_t y = 0; y < src.Height(); ++y) {
-            for (std::size_t x = 0; x < src.Width(); ++x) {
-                const Pixel& p = src.At(x, y);
-                const double v = 0.299 * p.r + 0.587 * p.g + 0.114 * p.b;
-                dst.At(x, y) = Pixel{v, v, v};
+    void Apply(Image& image) const override {
+        const int w = image.GetWidth();
+        const int h = image.GetHeight();
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                Pixel p = image.GetPixel(x, y);
+                const int g = static_cast<int>(std::lround(0.299 * p.r + 0.587 * p.g + 0.114 * p.b));
+                const uint8_t gg = ClampU8(g);
+                image.SetPixel(x, y, Pixel{gg, gg, gg});
             }
         }
-
-        return dst;
     }
 };
+
+std::unique_ptr<Filter> MakeGrayscale() {
+    return std::make_unique<GrayscaleFilter>();
+}
