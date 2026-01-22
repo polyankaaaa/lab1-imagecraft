@@ -1,176 +1,162 @@
 #include "bmp.h"
 
-#include <algorithm>
 #include <cstdint>
 #include <fstream>
 #include <stdexcept>
 #include <vector>
 
-#pragma pack(push, 1)
-struct BmpFileHeader {
-    uint16_t bfType = 0;
-    uint32_t bfSize = 0;
-    uint16_t bfReserved1 = 0;
-    uint16_t bfReserved2 = 0;
-    uint32_t bfOffBits = 0;
-};
-
-struct BmpInfoHeader {
-    uint32_t biSize = 0;
-    int32_t biWidth = 0;
-    int32_t biHeight = 0;
-    uint16_t biPlanes = 0;
-    uint16_t biBitCount = 0;
-    uint32_t biCompression = 0;
-    uint32_t biSizeImage = 0;
-    int32_t biXPelsPerMeter = 0;
-    int32_t biYPelsPerMeter = 0;
-    uint32_t biClrUsed = 0;
-    uint32_t biClrImportant = 0;
-};
-#pragma pack(pop)
-
-static uint8_t ToByte(float v) {
-    if (v < 0.0f) v = 0.0f;
-    if (v > 1.0f) v = 1.0f;
-    return static_cast<uint8_t>(v * 255.0f + 0.5f);
+static uint16_t ReadU16(std::istream& in) {
+    uint8_t b0{}, b1{};
+    in.read(reinterpret_cast<char*>(&b0), 1);
+    in.read(reinterpret_cast<char*>(&b1), 1);
+    return static_cast<uint16_t>(b0 | (static_cast<uint16_t>(b1) << 8));
 }
 
-static float ToFloat(uint8_t v) {
-    return static_cast<float>(v) / 255.0f;
+static uint32_t ReadU32(std::istream& in) {
+    uint8_t b[4]{};
+    in.read(reinterpret_cast<char*>(b), 4);
+    return static_cast<uint32_t>(b[0]) |
+           (static_cast<uint32_t>(b[1]) << 8) |
+           (static_cast<uint32_t>(b[2]) << 16) |
+           (static_cast<uint32_t>(b[3]) << 24);
+}
+
+static int32_t ReadI32(std::istream& in) {
+    return static_cast<int32_t>(ReadU32(in));
+}
+
+static void WriteU16(std::ostream& out, uint16_t v) {
+    uint8_t b[2]{static_cast<uint8_t>(v & 0xFF), static_cast<uint8_t>((v >> 8) & 0xFF)};
+    out.write(reinterpret_cast<const char*>(b), 2);
+}
+
+static void WriteU32(std::ostream& out, uint32_t v) {
+    uint8_t b[4]{
+        static_cast<uint8_t>(v & 0xFF),
+        static_cast<uint8_t>((v >> 8) & 0xFF),
+        static_cast<uint8_t>((v >> 16) & 0xFF),
+        static_cast<uint8_t>((v >> 24) & 0xFF)
+    };
+    out.write(reinterpret_cast<const char*>(b), 4);
+}
+
+static void WriteI32(std::ostream& out, int32_t v) {
+    WriteU32(out, static_cast<uint32_t>(v));
 }
 
 Image ReadBmp(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        throw std::runtime_error("Cannot open input file: " + path);
-    }
+    if (!in) throw std::runtime_error("cannot open input file");
 
-    BmpFileHeader fh{};
-    BmpInfoHeader ih{};
+    char sig[2]{};
+    in.read(sig, 2);
+    if (sig[0] != 'B' || sig[1] != 'M') throw std::runtime_error("not a BMP file");
 
-    in.read(reinterpret_cast<char*>(&fh), sizeof(fh));
-    in.read(reinterpret_cast<char*>(&ih), sizeof(ih));
-    if (!in) {
-        throw std::runtime_error("Bad BMP headers: " + path);
-    }
+    ReadU32(in);
+    ReadU16(in);
+    ReadU16(in);
+    const uint32_t data_offset = ReadU32(in);
 
-    if (fh.bfType != 0x4D42) {
-        throw std::runtime_error("Not a BMP file: " + path);
-    }
-    if (ih.biSize != 40) {
-        throw std::runtime_error("Unsupported BMP info header (need BITMAPINFOHEADER=40): " + path);
-    }
-    if (ih.biPlanes != 1) {
-        throw std::runtime_error("Unsupported BMP planes: " + path);
-    }
-    if (ih.biBitCount != 24) {
-        throw std::runtime_error("Unsupported BMP bit depth (need 24-bit): " + path);
-    }
-    if (ih.biCompression != 0) {
-        throw std::runtime_error("Unsupported BMP compression (need BI_RGB): " + path);
-    }
-    if (ih.biWidth <= 0 || ih.biHeight == 0) {
-        throw std::runtime_error("Unsupported BMP dimensions: " + path);
-    }
+    const uint32_t dib_size = ReadU32(in);
+    if (dib_size < 40) throw std::runtime_error("unsupported BMP DIB header");
 
-    const int width = ih.biWidth;
-    const bool topDown = (ih.biHeight < 0);
-    const int height = topDown ? -ih.biHeight : ih.biHeight;
+    const int32_t width = ReadI32(in);
+    const int32_t height_raw = ReadI32(in);
+    const uint16_t planes = ReadU16(in);
+    const uint16_t bpp = ReadU16(in);
+    const uint32_t compression = ReadU32(in);
+    ReadU32(in);
+    ReadI32(in);
+    ReadI32(in);
+    ReadU32(in);
+    ReadU32(in);
 
-    Image image(static_cast<std::size_t>(width), static_cast<std::size_t>(height));
+    if (planes != 1) throw std::runtime_error("unsupported BMP planes");
+    if (bpp != 24) throw std::runtime_error("only 24-bit BMP is supported");
+    if (compression != 0) throw std::runtime_error("compressed BMP is not supported");
+    if (width <= 0 || height_raw == 0) throw std::runtime_error("invalid BMP size");
 
-    const std::size_t rowBytes = static_cast<std::size_t>(width) * 3;
-    const std::size_t rowStride = (rowBytes + 3) / 4 * 4;
-    const std::size_t padding = rowStride - rowBytes;
+    const bool top_down = (height_raw < 0);
+    const int height = top_down ? -height_raw : height_raw;
 
-    in.seekg(static_cast<std::streamoff>(fh.bfOffBits), std::ios::beg);
-    if (!in) {
-        throw std::runtime_error("Bad BMP pixel offset: " + path);
-    }
+    in.seekg(static_cast<std::streamoff>(data_offset), std::ios::beg);
+    if (!in) throw std::runtime_error("invalid BMP offset");
+
+    Image img(width, height);
+
+    const int row_bytes = width * 3;
+    const int padding = (4 - (row_bytes % 4)) % 4;
+    std::vector<uint8_t> row(static_cast<size_t>(row_bytes));
 
     for (int y = 0; y < height; ++y) {
-        const int dstY = topDown ? y : (height - 1 - y);
+        const int dst_y = top_down ? y : (height - 1 - y);
+
+        in.read(reinterpret_cast<char*>(row.data()), row_bytes);
+        if (!in) throw std::runtime_error("unexpected end of file");
 
         for (int x = 0; x < width; ++x) {
-            uint8_t b = 0, g = 0, r = 0;
-            in.read(reinterpret_cast<char*>(&b), 1);
-            in.read(reinterpret_cast<char*>(&g), 1);
-            in.read(reinterpret_cast<char*>(&r), 1);
-            if (!in) {
-                throw std::runtime_error("Unexpected EOF while reading pixels: " + path);
-            }
-
-            Pixel& p = image.At(static_cast<std::size_t>(x), static_cast<std::size_t>(dstY));
-            p.r = ToFloat(r);
-            p.g = ToFloat(g);
-            p.b = ToFloat(b);
+            const uint8_t b = row[static_cast<size_t>(x * 3 + 0)];
+            const uint8_t g = row[static_cast<size_t>(x * 3 + 1)];
+            const uint8_t r = row[static_cast<size_t>(x * 3 + 2)];
+            img.SetPixel(x, dst_y, Pixel{r, g, b});
         }
 
-        in.ignore(static_cast<std::streamsize>(padding));
-        if (!in) {
-            throw std::runtime_error("Unexpected EOF while reading row padding: " + path);
+        if (padding) {
+            char pad[3]{};
+            in.read(pad, padding);
+            if (!in) throw std::runtime_error("unexpected end of file");
         }
     }
 
-    return image;
+    return img;
 }
 
 void WriteBmp(const std::string& path, const Image& image) {
-    const std::size_t width = image.Width();
-    const std::size_t height = image.Height();
+    const int width = image.GetWidth();
+    const int height = image.GetHeight();
+    if (width <= 0 || height <= 0) throw std::runtime_error("empty image");
 
-    if (width == 0 || height == 0) {
-        throw std::runtime_error("Cannot write empty image: " + path);
-    }
-
-    const std::size_t rowBytes = width * 3;
-    const std::size_t rowStride = (rowBytes + 3) / 4 * 4;
-    const std::size_t padding = rowStride - rowBytes;
-
-    BmpFileHeader fh{};
-    BmpInfoHeader ih{};
-
-    fh.bfType = 0x4D42;
-    fh.bfOffBits = sizeof(BmpFileHeader) + sizeof(BmpInfoHeader);
-    fh.bfSize = static_cast<uint32_t>(fh.bfOffBits + rowStride * height);
-
-    ih.biSize = 40;
-    ih.biWidth = static_cast<int32_t>(width);
-    ih.biHeight = static_cast<int32_t>(height);
-    ih.biPlanes = 1;
-    ih.biBitCount = 24;
-    ih.biCompression = 0;
-    ih.biSizeImage = static_cast<uint32_t>(rowStride * height);
+    const int row_bytes = width * 3;
+    const int padding = (4 - (row_bytes % 4)) % 4;
+    const uint32_t data_size = static_cast<uint32_t>((row_bytes + padding) * height);
+    const uint32_t data_offset = 14 + 40;
+    const uint32_t file_size = data_offset + data_size;
 
     std::ofstream out(path, std::ios::binary);
-    if (!out) {
-        throw std::runtime_error("Cannot open output file: " + path);
-    }
+    if (!out) throw std::runtime_error("cannot open output file");
 
-    out.write(reinterpret_cast<const char*>(&fh), sizeof(fh));
-    out.write(reinterpret_cast<const char*>(&ih), sizeof(ih));
+    out.put('B');
+    out.put('M');
+    WriteU32(out, file_size);
+    WriteU16(out, 0);
+    WriteU16(out, 0);
+    WriteU32(out, data_offset);
 
-    const uint8_t pad[3] = {0, 0, 0};
+    WriteU32(out, 40);
+    WriteI32(out, width);
+    WriteI32(out, height);
+    WriteU16(out, 1);
+    WriteU16(out, 24);
+    WriteU32(out, 0);
+    WriteU32(out, data_size);
+    WriteI32(out, 2835);
+    WriteI32(out, 2835);
+    WriteU32(out, 0);
+    WriteU32(out, 0);
 
-    for (std::size_t y = 0; y < height; ++y) {
-        const std::size_t srcY = height - 1 - y;
+    std::vector<uint8_t> row(static_cast<size_t>(row_bytes));
+    const uint8_t pad[3]{0, 0, 0};
 
-        for (std::size_t x = 0; x < width; ++x) {
-            const Pixel& p = image.At(x, srcY);
-            const uint8_t r = ToByte(p.r);
-            const uint8_t g = ToByte(p.g);
-            const uint8_t b = ToByte(p.b);
-
-            out.write(reinterpret_cast<const char*>(&b), 1);
-            out.write(reinterpret_cast<const char*>(&g), 1);
-            out.write(reinterpret_cast<const char*>(&r), 1);
+    for (int y = height - 1; y >= 0; --y) {
+        for (int x = 0; x < width; ++x) {
+            const Pixel p = image.GetPixel(x, y);
+            row[static_cast<size_t>(x * 3 + 0)] = p.b;
+            row[static_cast<size_t>(x * 3 + 1)] = p.g;
+            row[static_cast<size_t>(x * 3 + 2)] = p.r;
         }
-
-        out.write(reinterpret_cast<const char*>(pad), static_cast<std::streamsize>(padding));
+        out.write(reinterpret_cast<const char*>(row.data()), row_bytes);
+        if (padding) out.write(reinterpret_cast<const char*>(pad), padding);
     }
 
-    if (!out) {
-        throw std::runtime_error("Failed while writing BMP: " + path);
-    }
+    if (!out) throw std::runtime_error("failed to write BMP");
 }
